@@ -18,6 +18,10 @@ func main() {
 		log.Fatalf("Ошибка подключения к базе данных: %v", err)
 	}
 
+	if err := database.Migrate(); err != nil {
+		log.Fatalf("Ошибка выполнения миграций: %v", err)
+	}
+
 	app := fiber.New(fiber.Config{
 		Prefork: true,
 	})

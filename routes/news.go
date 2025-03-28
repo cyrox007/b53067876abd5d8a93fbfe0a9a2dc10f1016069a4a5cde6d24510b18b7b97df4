@@ -9,6 +9,6 @@ import (
 func RegisterProductRoutes(app *fiber.App) {
 	api := app.Group("/api")
 
-	api.Get("/products", handlers.GetNews)
-	api.Post("/products", handlers.CreateNews)
+	api.Post("/edit/:Id", handlers.EditNews)
+	api.Get("/list", handlers.GetNewsList)
 }
