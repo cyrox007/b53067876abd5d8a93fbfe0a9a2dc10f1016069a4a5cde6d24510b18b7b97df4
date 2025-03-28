@@ -1,7 +1,6 @@
 package handlers
 
 import (
-	"database/sql"
 	"strconv"
 	"test/database"
 	"test/logger"
@@ -66,12 +65,11 @@ func EditNews(c *fiber.Ctx) error {
 	}()
 
 	// Обновляем новость
-	result := tx.Model(&models.News{}).Where("id = ?", newsID).Updates(models.News{
+	if err := tx.Model(&models.News{}).Where("id = ?", newsID).Updates(models.News{
 		Title:   req.Title,
 		Content: req.Content,
-	})
-	if result.Error != nil {
-		logger.Logger.WithError(result.Error).Error("Ошибка обновления новости")
+	}).Error; err != nil {
+		logger.Logger.WithError(err).Error("Ошибка обновления новости")
 		tx.Rollback()
 		return c.Status(500).JSON(fiber.Map{
 			"Success": false,
@@ -141,16 +139,18 @@ func GetNewsList(c *fiber.Ctx) error {
 		"limit": limit,
 	}).Info("Запрос списка новостей")
 
-	// Запрос для получения новостей и их категорий
-	query := `
-        SELECT n.id, n.title, n.content, nc.category_id
-        FROM news n
-        LEFT JOIN news_categories nc ON n.id = nc.news_id
-        ORDER BY n.id
-        LIMIT ? OFFSET ?
-    `
+	// Инициализируем массив новостей
+	var newsList []models.NewsResponse
 
-	rows, err := database.DB.Raw(query, limit, offset).Rows()
+	// Выполняем запрос с использованием GORM
+	err := database.DB.Model(&models.News{}).
+		Select("news.id, news.title, news.content, news_categories.category_id").
+		Joins("LEFT JOIN news_categories ON news.id = news_categories.news_id").
+		Order("news.id").
+		Limit(limit).
+		Offset(offset).
+		Scan(&newsList).Error
+
 	if err != nil {
 		logger.Logger.Errorf("Ошибка выполнения запроса к базе данных: %v", err)
 		return c.Status(500).JSON(fiber.Map{
@@ -158,50 +158,32 @@ func GetNewsList(c *fiber.Ctx) error {
 			"Message": "Ошибка выполнения запроса к базе данных",
 		})
 	}
-	defer rows.Close()
 
-	// Карта для группировки новостей и их категорий
+	// Группируем данные по ID новости
 	newsMap := make(map[uint]*models.NewsResponse)
-
-	for rows.Next() {
-		var newsID uint
-		var title, content string
-		var categoryID sql.NullInt64
-
-		err := rows.Scan(&newsID, &title, &content, &categoryID)
-		if err != nil {
-			logger.Logger.Errorf("Ошибка сканирования данных: %v", err)
-			return c.Status(500).JSON(fiber.Map{
-				"Success": false,
-				"Message": "Ошибка сканирования данных",
-			})
-		}
-
-		// Если новость еще не добавлена в карту, создаем запись
-		if _, exists := newsMap[newsID]; !exists {
-			newsMap[newsID] = &models.NewsResponse{
-				Id:         newsID,
-				Title:      title,
-				Content:    content,
+	for _, news := range newsList {
+		if _, exists := newsMap[news.Id]; !exists {
+			newsMap[news.Id] = &models.NewsResponse{
+				Id:         news.Id,
+				Title:      news.Title,
+				Content:    news.Content,
 				Categories: []uint{},
 			}
 		}
-
-		// Добавляем категорию, если она существует
-		if categoryID.Valid {
-			newsMap[newsID].Categories = append(newsMap[newsID].Categories, uint(categoryID.Int64))
+		if news.Categories != nil {
+			newsMap[news.Id].Categories = append(newsMap[news.Id].Categories, news.Categories...)
 		}
 	}
 
 	// Преобразуем карту в массив новостей
-	var newsList []models.NewsResponse
+	var result []models.NewsResponse
 	for _, news := range newsMap {
-		newsList = append(newsList, *news)
+		result = append(result, *news)
 	}
 
-	logger.Logger.WithField("count", len(newsList)).Info("Новости успешно получены")
+	logger.Logger.WithField("count", len(result)).Info("Новости успешно получены")
 	return c.JSON(fiber.Map{
 		"Success": true,
-		"News":    newsList,
+		"News":    result,
 	})
 }
