@@ -57,7 +57,7 @@ func Connect() error {
 }
 
 func Migrate() error {
-	err := DB.AutoMigrate(&models.News{}, &models.NewsCategory{}) // Используем полные пути к моделям
+	err := DB.AutoMigrate(&models.News{}, &models.NewsCategory{})
 	if err != nil {
 		return fmt.Errorf("ошибка при выполнении миграций: %v", err)
 	}

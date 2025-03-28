@@ -25,7 +25,7 @@ func EditNews(c *fiber.Ctx) error {
 	// Преобразуем uint64 в uint
 	newsID := uint(newsIDUint64)
 
-	var req models.News
+	var req models.NewsResponse
 
 	// Парсим тело запроса
 	if err := c.BodyParser(&req); err != nil {
@@ -126,12 +126,12 @@ func GetNewsList(c *fiber.Ctx) error {
 	defer rows.Close()
 
 	// Карта для группировки новостей и их категорий
-	newsMap := make(map[uint]*models.News)
+	newsMap := make(map[uint]*models.NewsResponse)
 
 	for rows.Next() {
 		var newsID uint
 		var title, content string
-		var categoryID sql.NullInt64
+		var categoryID sql.NullInt64 // Используем NullInt64, так как категория может отсутствовать
 
 		err := rows.Scan(&newsID, &title, &content, &categoryID)
 		if err != nil {
@@ -141,9 +141,9 @@ func GetNewsList(c *fiber.Ctx) error {
 			})
 		}
 
-		// Если новость уже есть в карте, добавляем категорию
+		// Если новость еще не добавлена в карту, создаем запись
 		if _, exists := newsMap[newsID]; !exists {
-			newsMap[newsID] = &models.News{
+			newsMap[newsID] = &models.NewsResponse{
 				Id:         newsID,
 				Title:      title,
 				Content:    content,
@@ -158,7 +158,7 @@ func GetNewsList(c *fiber.Ctx) error {
 	}
 
 	// Преобразуем карту в массив новостей
-	var newsList []models.News
+	var newsList []models.NewsResponse
 	for _, news := range newsMap {
 		newsList = append(newsList, *news)
 	}
