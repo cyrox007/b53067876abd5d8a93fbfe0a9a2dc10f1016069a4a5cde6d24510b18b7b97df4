@@ -13,6 +13,8 @@ func RegisterNewsRoutes(app *fiber.App) {
 	// Защищенные маршруты (требуют JWT-токен)
 	protected := api.Group("/", middleware.AuthMiddleware)
 
-	protected.Post("/edit/:Id", handlers.EditNews)
+	protected.Post("/create", handlers.CreateNews)       // Создание новости
+	protected.Post("/edit/:Id", handlers.EditNews)       // Редактирование новости
+	protected.Delete("/delete/:Id", handlers.DeleteNews) // Удаление новости
 	protected.Get("/list", handlers.GetNewsList)
 }

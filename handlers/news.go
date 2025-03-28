@@ -175,7 +175,6 @@ func GetNewsList(c *fiber.Ctx) error {
 		}
 	}
 
-	// Преобразуем карту в массив новостей
 	var result []models.NewsResponse
 	for _, news := range newsMap {
 		result = append(result, *news)
@@ -185,5 +184,164 @@ func GetNewsList(c *fiber.Ctx) error {
 	return c.JSON(fiber.Map{
 		"Success": true,
 		"News":    result,
+	})
+}
+
+func CreateNews(c *fiber.Ctx) error {
+	var req models.NewsResponse
+
+	// Парсим тело запроса
+	if err := c.BodyParser(&req); err != nil {
+		logger.Logger.WithError(err).Warn("Ошибка парсинга тела запроса")
+		return c.Status(400).JSON(fiber.Map{
+			"Success": false,
+			"Message": "Неверный формат запроса",
+		})
+	}
+
+	logger.Logger.WithFields(logrus.Fields{
+		"title":      req.Title,
+		"content":    req.Content,
+		"categories": req.Categories,
+	}).Info("Тело запроса успешно распарсено")
+
+	// Валидация полей
+	if req.Title == "" || req.Content == "" {
+		logger.Logger.Warn("Заголовок или содержимое новости пустые")
+		return c.Status(400).JSON(fiber.Map{
+			"Success": false,
+			"Message": "Заголовок и содержимое обязательны",
+		})
+	}
+
+	// Начинаем транзакцию
+	tx := database.DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Logger.WithField("error", r).Error("Произошла ошибка, выполняется откат транзакции")
+			tx.Rollback()
+		}
+	}()
+
+	// Создаем новость
+	news := models.News{
+		Title:   req.Title,
+		Content: req.Content,
+	}
+
+	if err := tx.Create(&news).Error; err != nil {
+		logger.Logger.WithError(err).Error("Ошибка создания новости")
+		tx.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"Success": false,
+			"Message": "Ошибка создания новости",
+		})
+	}
+
+	logger.Logger.WithField("news_id", news.Id).Info("Новость успешно создана")
+
+	// Добавляем категории
+	for _, categoryID := range req.Categories {
+		if err := tx.Create(&models.NewsCategory{
+			NewsId:     news.Id,
+			CategoryId: categoryID,
+		}).Error; err != nil {
+			logger.Logger.WithFields(logrus.Fields{
+				"news_id":     news.Id,
+				"category_id": categoryID,
+				"error":       err,
+			}).Error("Ошибка сохранения категории")
+			tx.Rollback()
+			return c.Status(500).JSON(fiber.Map{
+				"Success": false,
+				"Message": "Ошибка сохранения категории",
+			})
+		}
+	}
+
+	logger.Logger.WithField("news_id", news.Id).Info("Категории успешно добавлены")
+
+	// Фиксируем транзакцию
+	if err := tx.Commit().Error; err != nil {
+		logger.Logger.WithError(err).Error("Ошибка фиксации транзакции")
+		return c.Status(500).JSON(fiber.Map{
+			"Success": false,
+			"Message": "Ошибка фиксации транзакции",
+		})
+	}
+
+	logger.Logger.WithField("news_id", news.Id).Info("Транзакция успешно зафиксирована")
+	return c.JSON(fiber.Map{
+		"Success": true,
+		"Message": "Новость успешно создана",
+		"NewsId":  news.Id,
+	})
+}
+
+func DeleteNews(c *fiber.Ctx) error {
+	// Извлекаем параметр Id из маршрута
+	newsIDStr := c.Params("Id")
+
+	logger.Logger.WithField("news_id", newsIDStr).Debug("Получен ID новости для удаления")
+
+	// Преобразуем строку в uint
+	newsIDUint64, err := strconv.ParseUint(newsIDStr, 10, 64)
+	if err != nil {
+		logger.Logger.WithError(err).Warn("Неверный формат ID новости")
+		return c.Status(400).JSON(fiber.Map{
+			"Success": false,
+			"Message": "Неверный формат ID новости",
+		})
+	}
+
+	// Преобразуем uint64 в uint
+	newsID := uint(newsIDUint64)
+
+	// Начинаем транзакцию
+	tx := database.DB.Begin()
+	defer func() {
+		if r := recover(); r != nil {
+			logger.Logger.WithField("error", r).Error("Произошла ошибка, выполняется откат транзакции")
+			tx.Rollback()
+		}
+	}()
+
+	// Удаляем связанные категории
+	if err := tx.Where("news_id = ?", newsID).Delete(&models.NewsCategory{}).Error; err != nil {
+		logger.Logger.WithError(err).Error("Ошибка удаления категорий")
+		tx.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"Success": false,
+			"Message": "Ошибка удаления категорий",
+		})
+	}
+
+	logger.Logger.WithField("news_id", newsID).Info("Категории успешно удалены")
+
+	// Удаляем новость
+	if err := tx.Delete(&models.News{}, newsID).Error; err != nil {
+		logger.Logger.WithError(err).Error("Ошибка удаления новости")
+		tx.Rollback()
+		return c.Status(500).JSON(fiber.Map{
+			"Success": false,
+			"Message": "Ошибка удаления новости",
+		})
+	}
+
+	logger.Logger.WithField("news_id", newsID).Info("Новость успешно удалена")
+
+	// Фиксируем транзакцию
+	if err := tx.Commit().Error; err != nil {
+		logger.Logger.WithError(err).Error("Ошибка фиксации транзакции")
+		return c.Status(500).JSON(fiber.Map{
+			"Success": false,
+			"Message": "Ошибка фиксации транзакции",
+		})
+	}
+
+	logger.Logger.WithField("news_id", newsID).Info("Транзакция успешно зафиксирована")
+	return c.JSON(fiber.Map{
+		"Success": true,
+		"Message": "Новость успешно удалена",
 	})
 }
